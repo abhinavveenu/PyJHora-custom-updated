@@ -24,6 +24,8 @@
 from jhora import const,utils
 from jhora.panchanga import drik
 from jhora.horoscope.chart import charts, house
+import swisseph as swe
+import datetime
 
 ######################### Chesta bala constants start here #############################
 _DOB_EPOCH = (1900,1,1); _TOB_EPOCH = (0,0,0); _PLACE_EPOCH = drik.Place('Ujjain,India',23.18,76,5.5)
@@ -416,16 +418,63 @@ def dwadhasa_vargeeya_bala(jd,place):
                 dvp[p]+=1
     dvpd = {k:dvp[k] for k in range(7)}
     return dvpd
-def _dig_bala(jd,place,ayanamsa_mode=const._DEFAULT_AYANAMSA_MODE):
-    planet_positions = charts.rasi_chart(jd, place,ayanamsa_mode=ayanamsa_mode)
-    powerless_houses_of_planets = [3,9,3,6,6,9,0]#[4,10,4,7,7,10,1]
+def _dig_bala(jd, place, ayanamsa_mode=const._DEFAULT_AYANAMSA_MODE):
+    planet_positions = charts.rasi_chart(jd, place, ayanamsa_mode=ayanamsa_mode)
+    
+    # Get the four kendras (cardinal points)
     bm = drik.bhaava_madhya(jd, place)
-    dbf = [bm[p] for p in powerless_houses_of_planets]
-    dbp = [0 for _ in range(7)]
-    for p,(h,long) in planet_positions[1:const._pp_count_upto_saturn]:
-        p_long = h*30+long
-        dbp[p] = round(abs(dbf[p]-p_long)/3,2)
+    lagna = bm[0]  # 1st house cusp
+    ic = bm[3]     # 4th house cusp  
+    desc = bm[6]   # 7th house cusp
+    mc = bm[9]     # 10th house cusp
+    
+    # Planets have maximum dig bala at these houses (60 virupas)
+    # and zero dig bala at opposite houses
+    dig_bala_max = {
+        0: mc,    # Sun - maximum at 10th, zero at 4th
+        1: ic,    # Moon - maximum at 4th, zero at 10th
+        2: mc,    # Mars - maximum at 10th, zero at 4th
+        3: lagna, # Mercury - maximum at 1st, zero at 7th
+        4: lagna, # Jupiter - maximum at 1st, zero at 7th
+        5: ic,    # Venus - maximum at 4th, zero at 10th
+        6: desc   # Saturn - maximum at 7th, zero at 1st
+    }
+    
+    dbp = []
+    
+    # Process planets from Sun (index 1) to Saturn (index 7)
+    for p in range(7):  # 0 to 6 for Sun through Saturn
+        planet_data = planet_positions[p + 1]  # +1 because index 0 is Lagna
+        i, long = planet_data  # Unpack the tuple
+        
+        # Calculate planet's absolute longitude in degrees
+        p_long = long[0] * 30 + long[1]
+        
+        # Find angular distance from point of maximum strength
+        max_point = dig_bala_max[p]
+        
+        # Calculate angular distance (0-180 degrees)
+        diff = abs(p_long - max_point)
+        if diff > 180:
+            diff = 360 - diff
+            
+        # Convert to Dig Bala (max 60 at 0°, min 0 at 180°)
+        dig_bala = 60 * (1 - diff/180)
+        dbp.append(round(dig_bala, 2))
+    
     return dbp
+# def _dig_bala(jd,place,ayanamsa_mode=const._DEFAULT_AYANAMSA_MODE):
+#     planet_positions = charts.rasi_chart(jd, place,ayanamsa_mode=ayanamsa_mode)
+#     print('planet_positions',planet_positions)
+#     powerless_houses_of_planets = [3,9,3,6,6,9,0]#[4,10,4,7,7,10,1]
+#     bm = drik.bhaava_madhya(jd, place)
+#     print('bm',bm)
+#     dbf = [bm[p] for p in powerless_houses_of_planets]
+#     dbp = [0 for _ in range(7)]
+#     for p,(h,long) in planet_positions[1:const._pp_count_upto_saturn]:
+#         p_long = h*30+long
+#         dbp[p] = round(abs(dbf[p]-p_long)/3,2)
+#     return dbp
 def _divaratri_bala(jd,place):
     return _nathonnath_bala(jd,place)
 def _nathonnath_bala(jd,place):
@@ -439,6 +488,8 @@ def _nathonnath_bala(jd,place):
         nbp[p] = round(60 - t_diff,2)
     nbp[3] = 60.0
     return nbp
+
+
 def _paksha_bala(jd,place,ayanamsa_mode=const._DEFAULT_AYANAMSA_MODE):
     planet_positions = drik.dhasavarga(jd, place,divisional_chart_factor=1)
     sun_long = planet_positions[0][1][0]*30+planet_positions[0][1][1]
@@ -524,16 +575,20 @@ def _masa_bala(jd,place):
     abp[day] = 30
     return abp
 def _vaaradhipathi(jd,place):
+    cal = swe.revjul(jd, swe.GREG_CAL)
+    py_date = datetime.date(cal[0], cal[1], cal[2])
+    weekday_number = (py_date.weekday() + 1)%7
     abp = [0 for _ in range(7)]
-    _abda_weekdays = [2,3,4,5,6,0,1]
-    ay,am,ad,bth = utils.jd_to_gregorian(jd)
-    elpased_days_in_year = int(jd-utils.gregorian_to_jd(drik.Date(ay,1,1))+1)
-    _ahargana_days = _days_elapsed_since_base(ay-1, base_year=1827, base_days=244)+elpased_days_in_year
-    #_ahargana_days = _days_elapsed_since_base(ay-1)+elpased_days_in_year if vaaradhipathi_method==1 \
-    #                    else _days_elapsed_since_base(ay-1, base_year=1827, base_days=244)+elpased_days_in_year
-    if bth < drik.sunrise(jd, place)[0]: _ahargana_days -= 1
-    day = int(_ahargana_days)%7 # Add 1 get 1st day of the next kali year
-    abp[_abda_weekdays[day]] = 45
+    abp[weekday_number] = 45
+    # _abda_weekdays = [2,3,4,5,6,0,1]
+    # ay,am,ad,bth = utils.jd_to_gregorian(jd)
+    # elpased_days_in_year = int(jd-utils.gregorian_to_jd(drik.Date(ay,1,1))+1)
+    # _ahargana_days = _days_elapsed_since_base(ay-1, base_year=1827, base_days=244)+elpased_days_in_year
+    # #_ahargana_days = _days_elapsed_since_base(ay-1)+elpased_days_in_year if vaaradhipathi_method==1 \
+    # #                    else _days_elapsed_since_base(ay-1, base_year=1827, base_days=244)+elpased_days_in_year
+    # if bth < drik.sunrise(jd, place)[0]: _ahargana_days -= 1
+    # day = int(_ahargana_days)%7 # Add 1 get 1st day of the next kali year
+    # abp[_abda_weekdays[day]] = 45
     return abp
 def _vaara_bala(jd,place):
     abp = [0 for _ in range(7)]
@@ -615,6 +670,7 @@ def _kaala_bala(jd,place,ayanamsa_mode=const._DEFAULT_AYANAMSA_MODE):
         kb[p] += ayb[p]
         kb[p] += yb[p]
     kb = [round(kbp,2) for kbp in kb]
+    
     return kb
 def _ishta_phala(jd,place):
     planet_positions = charts.rasi_chart(jd, place)
